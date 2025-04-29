@@ -1,0 +1,75 @@
+version: '3.8'
+
+services:
+  # MongoDB service
+  mongodb:
+    image: mongo:6.0
+    container_name: task-manager-mongodb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - task-manager-network
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # Backend API service
+  task-manager-api:
+    build:
+      context: ./
+      dockerfile: Dockerfile
+      args:
+        BUILD_VERSION: ${VERSION:-0.0.1-SNAPSHOT}
+        BUILD_DATE: ${BUILD_DATE:-unknown}
+        VCS_REF: ${GIT_COMMIT:-unknown}
+    image: task-manager-api:${VERSION:-latest}
+    container_name: task-manager-api
+    environment:
+      - SPRING_DATA_MONGODB_HOST=mongodb
+      - SPRING_DATA_MONGODB_PORT=27017
+      - SPRING_DATA_MONGODB_DATABASE=taskmanager
+      - TOGGLZ_FEATURES_TASK_CATEGORIES_ENABLED=${FEATURE_CATEGORIES:-true}
+      - TOGGLZ_FEATURES_TASK_PRIORITIES_ENABLED=${FEATURE_PRIORITIES:-true}
+      - SPRING_WEB_CORS_ALLOWED_ORIGINS=${CORS_ORIGINS:-http://localhost:3000}
+    ports:
+      - "8080:8080"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    networks:
+      - task-manager-network
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Frontend service
+  task-manager-frontend:
+    build:
+      context: ./task-manager-frontend
+      dockerfile: Dockerfile
+      args:
+        API_URL: ${API_URL:-http://localhost:8080}
+        VERSION: ${VERSION:-0.0.1-SNAPSHOT}
+    image: task-manager-frontend:${VERSION:-latest}
+    container_name: task-manager-frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - task-manager-api
+    networks:
+      - task-manager-network
+
+networks:
+  task-manager-network:
+    driver: bridge
+
+volumes:
+  mongodb_data:
